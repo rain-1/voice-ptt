@@ -6,8 +6,11 @@ Usage: tray_helper.py ICON_DIR
 stdin  (from voice_ptt.py), tab-separated lines:
     state<TAB>NAME<TAB>TOOLTIP   -> switch icon to ICON_DIR/NAME.png, update status line
     info<TAB>KEY<TAB>TEXT        -> update an info line (hotkey, model, mic, last)
+    info<TAB>block<TAB>on|off    -> relabel the Block menu item
 stdout (to voice_ptt.py):
     toggle                       -> user left-clicked the icon or chose Start/Stop listening
+    toggle_block                 -> user chose Block / Unblock
+    unload                       -> user chose Unload model now
 Exits when stdin closes.
 """
 import os
@@ -28,8 +31,8 @@ icon = XApp.StatusIcon()
 icon.set_name("voice-ptt")
 
 
-def send_toggle(*_):
-    print("toggle", flush=True)
+def send(cmd):
+    return lambda *_: print(cmd, flush=True)
 
 
 def quit_all(*_):
@@ -53,7 +56,11 @@ menu = Gtk.Menu()
 status_item = label_item("Status: starting...")
 info_items = {k: label_item(f"{k.capitalize()}: ...") for k in ("hotkey", "model", "mic", "last")}
 toggle_item = Gtk.MenuItem(label="Start listening")
-toggle_item.connect("activate", send_toggle)
+toggle_item.connect("activate", send("toggle"))
+unload_item = Gtk.MenuItem(label="Unload model now")
+unload_item.connect("activate", send("unload"))
+block_item = Gtk.MenuItem(label="Block (free GPU, ignore hotkey)")
+block_item.connect("activate", send("toggle_block"))
 log_item = Gtk.MenuItem(label="Open log")
 log_item.connect("activate", open_log)
 quit_item = Gtk.MenuItem(label="Quit voice-ptt")
@@ -65,12 +72,15 @@ for item in info_items.values():
     menu.append(item)
 menu.append(Gtk.SeparatorMenuItem())
 menu.append(toggle_item)
+menu.append(unload_item)
+menu.append(block_item)
+menu.append(Gtk.SeparatorMenuItem())
 menu.append(log_item)
 menu.append(Gtk.SeparatorMenuItem())
 menu.append(quit_item)
 menu.show_all()
 icon.set_secondary_menu(menu)  # right click
-icon.connect("activate", lambda _icon, button, _time: send_toggle() if button == 1 else None)  # left click
+icon.connect("activate", lambda _icon, button, _time: send("toggle")() if button == 1 else None)  # left click
 icon.set_visible(True)
 
 
@@ -84,6 +94,9 @@ def set_state(name, tooltip):
 
 
 def set_info(key, text):
+    if key == "block":
+        block_item.set_label("Unblock" if text == "on" else "Block (free GPU, ignore hotkey)")
+        return
     item = info_items.get(key)
     if item is not None:
         item.set_label(text.replace("_", "__"))  # GTK treats _ as a mnemonic marker

@@ -15,7 +15,13 @@ The model downloads on first run. For autostart, copy a `.desktop` entry that ru
 
 ## Tray icon
 
-A colour dot shows the state: grey loading, green ready, red listening, amber transcribing. Left-click toggles listening, right-click shows status, hotkey, model, mic and the last transcription. It uses the XApp status icon through the system Python (`python3-gi`, `gir1.2-xapp`, present on Cinnamon). Set `"tray": false` to disable it.
+A colour dot shows the state: grey loading, green ready, red listening, amber transcribing. Blue means idle (model not loaded), dark grey with a slash means blocked. Left-click toggles listening, right-click shows status, hotkey, model, mic and the last transcription, plus Unload model now and Block. It uses the XApp status icon through the system Python (`python3-gi`, `gir1.2-xapp`, present on Cinnamon). Set `"tray": false` to disable it.
+
+## GPU use
+
+The model lives in a separate worker process (`whisper_worker.py`) that starts on first use and is killed after `idle_unload_seconds` of inactivity, so the GPU is free for other work. The first phrase after an unload waits for the model to load; recording starts immediately and is transcribed once it is ready.
+
+**Block** (tray menu) unloads the model, ignores the hotkey and remembers the setting across restarts (`~/.config/voice-ptt/state.json`) until you choose Unblock. Use it during ML runs.
 
 ## Config
 
@@ -23,4 +29,5 @@ A colour dot shows the state: grey loading, green ready, red listening, amber tr
 
 - `hotkey`: pynput key name (`ctrl_r`, `f13`, `pause`, ...). A foot pedal that sends the same key works unchanged.
 - `model`, `language`, `device`, `compute_type`: Whisper settings (use `cpu` and `int8` without a GPU).
+- `preload`: load the model at startup instead of on first use. `idle_unload_seconds`: 300 by default, 0 keeps it loaded.
 - `mic`: `pactl list short sources` name, or null for the system default.
