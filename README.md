@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/logo.png" alt="voice-ptt logo: an engraved microphone in a sunburst" width="240"></p>
+
 # voice-ptt
 
 Local hold-to-talk dictation for Linux (X11). Hold a key (or foot pedal), speak, release, and the text is typed into the focused window.
@@ -47,3 +49,7 @@ Set `"vocab": false` or `"corrections": false` in the config to turn either off.
 - `model`, `language`, `device`, `compute_type`: Whisper settings (use `cpu` and `int8` without a GPU).
 - `preload`: load the model at startup instead of on first use. `idle_unload_seconds`: 300 by default, 0 keeps it loaded.
 - `mic`: `pactl list short sources` name, or null for the system default.
+
+## Logo
+
+`assets/logo.svg` and `assets/logo.png` (transparent background) were generated procedurally with [woodcut](../woodcut), a wood-engraving style print generator.
