@@ -26,6 +26,9 @@ LOCK_PATH = os.path.expanduser("~/.cache/voice-ptt.lock")
 DEFAULTS = {
     # pynput key name: "scroll_lock", "f9", "f13", "pause", "ctrl_r", or a single char
     "hotkey": "ctrl_r",
+    # The hotkey only starts dictation after being held this long with no other key pressed, so
+    # taps and shortcuts like Ctrl+PageUp don't trigger it. 0 = start immediately.
+    "hold_ms": 250,
     "model": "large-v3-turbo",
     "language": "en",  # null = auto-detect
     "device": "cuda",  # "cuda" or "cpu"
@@ -222,7 +225,9 @@ class Recorder:
         self.thread = None
 
     def start(self):
-        cmd = ["parecord", "--raw", f"--rate={self.RATE}", "--channels=1", "--format=s16le"]
+        # Low latency matters: with the default buffering the first data arrives ~2s after start,
+        # so the beginning of a phrase is lost and short holds capture nothing.
+        cmd = ["parecord", "--raw", "--latency-msec=30", f"--rate={self.RATE}", "--channels=1", "--format=s16le"]
         if self.mic:
             cmd.append(f"--device={self.mic}")
         self.chunks = []
@@ -289,14 +294,18 @@ def main():
     rec = Recorder(cfg["mic"])
     lock = threading.Lock()  # guards recording / started_by / pending
     recording = False
+    committed = False  # recording confirmed as dictation (hold elapsed); False while provisional
     started_by = None
     pending = 0
     blocked = load_blocked()
+    key_down = False  # hotkey physically held
+    chord = False  # another key was pressed during this hold
+    hold_id = 0
 
     def compute_state():
         if blocked:
             return "blocked"
-        if recording:
+        if recording and committed:
             return "recording"
         if pending:
             return "transcribing" if engine.loaded else "loading"
@@ -318,7 +327,9 @@ def main():
     def transcribe_and_type(audio):
         nonlocal pending
         try:
-            if len(audio) >= cfg["min_seconds"] * Recorder.RATE and not blocked:
+            if len(audio) < cfg["min_seconds"] * Recorder.RATE:
+                print(f"too short ({len(audio) / Recorder.RATE:.2f}s), skipped", flush=True)
+            elif not blocked:
                 text, secs = engine.transcribe(audio)
                 if cfg["corrections"]:
                     text = corrections.apply(text)
@@ -335,23 +346,50 @@ def main():
             refresh()
 
     def start_recording(source):
-        nonlocal recording, started_by
+        """Start capturing. A hotkey recording stays provisional (silent) until commit_hold."""
+        nonlocal recording, started_by, committed
         with lock:
             if recording or blocked:
-                return
+                return False
             recording = True
             started_by = source
-        beep(cfg, "message")
+            committed = source != "key" or cfg["hold_ms"] <= 0
         rec.start()
+        if committed:
+            beep(cfg, "message")
+            refresh()
+        return True
+
+    def cancel_key_recording(reason):
+        """Discard a hotkey recording that turned out to be a tap or a shortcut."""
+        nonlocal recording, committed
+        with lock:
+            if not recording or started_by != "key":
+                return
+            recording = False
+            was_committed, committed = committed, False
+        rec.stop()
+        print(f"hotkey ignored ({reason})", flush=True)
+        if was_committed:
+            refresh()
+
+    def commit_hold(my_id):
+        nonlocal committed
+        with lock:
+            if my_id != hold_id or not key_down or chord or not recording or started_by != "key" or committed:
+                return
+            committed = True
+        beep(cfg, "message")
         refresh()
 
     def stop_recording(source=None):
         """Stop and transcribe. With a source, only stops a recording that source started."""
-        nonlocal recording, pending
+        nonlocal recording, committed, pending
         with lock:
             if not recording or (source and started_by != source):
                 return
             recording = False
+            committed = False
             pending += 1
         audio = rec.stop()
         beep(cfg, "complete")
@@ -365,10 +403,11 @@ def main():
             start_recording("click")
 
     def toggle_block():
-        nonlocal blocked, recording
+        nonlocal blocked, recording, committed
         with lock:
             blocked = not blocked
             was_recording, recording = recording, False
+            committed = False
         save_blocked(blocked)
         if blocked:
             if was_recording:
@@ -415,12 +454,29 @@ def main():
         threading.Thread(target=engine.warm, daemon=True).start()
 
     def on_press(key):
-        if key == hotkey:  # auto-repeat presses are ignored by start_recording
-            start_recording("key")
+        nonlocal key_down, chord, hold_id
+        if key == hotkey:
+            if key_down:  # auto-repeat
+                return
+            key_down, chord = True, False
+            hold_id += 1
+            if start_recording("key") and cfg["hold_ms"] > 0:
+                threading.Timer(cfg["hold_ms"] / 1000, commit_hold, args=(hold_id,)).start()
+        elif key_down:  # another key during the hold: a shortcut like Ctrl+PageUp, not dictation
+            chord = True
+            cancel_key_recording(f"shortcut: {key} pressed during hold")
 
     def on_release(key):
-        if key == hotkey:
-            stop_recording("key")
+        nonlocal key_down
+        if key != hotkey:
+            return
+        key_down = False
+        with lock:
+            was_committed = committed
+        if was_committed:
+            stop_recording("key")  # no-op if a click started this recording
+        else:
+            cancel_key_recording("tap: released before hold_ms")  # discard
 
     print(f"{'BLOCKED' if blocked else 'ready'}: hold [{key_name}] to talk (model loads on first use)", flush=True)
     with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
