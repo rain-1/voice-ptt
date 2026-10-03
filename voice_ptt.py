@@ -10,6 +10,7 @@ import fcntl
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -54,6 +55,24 @@ def load_config():
         with open(CONFIG_PATH, "w") as f:
             json.dump(DEFAULTS, f, indent=2)
     return cfg
+
+
+def save_config_value(key, value):
+    """Update one key in config.json, keeping everything else."""
+    with open(CONFIG_PATH) as f:
+        data = json.load(f)
+    data[key] = value
+    with open(CONFIG_PATH, "w") as f:
+        json.dump(data, f, indent=2)
+
+
+def key_to_name(key):
+    """pynput key -> config name (Key.ctrl_r -> 'ctrl_r', 'a' -> 'a'), or None if unnameable."""
+    name = getattr(key, "name", None)
+    if name:
+        return name
+    char = getattr(key, "char", None)
+    return char if char and char.isprintable() else None
 
 
 def load_blocked():
@@ -287,8 +306,14 @@ def main():
 
     from pynput import keyboard
 
+    def parse_key(name):
+        return getattr(keyboard.Key, name, None) or keyboard.KeyCode.from_char(name)
+
     key_name = cfg["hotkey"]
-    hotkey = getattr(keyboard.Key, key_name, None) or keyboard.KeyCode.from_char(key_name)
+    hotkey = parse_key(key_name)
+    capturing = False  # next key press becomes the new hotkey
+    capture_timer = None  # set while waiting to see if a generic modifier press is followed by a specific one
+    capture_generic = None
 
     corrections = vocab.Corrections()
     rec = Recorder(cfg["mic"])
@@ -421,6 +446,66 @@ def main():
             if cfg["preload"]:
                 threading.Thread(target=engine.warm, daemon=True).start()
 
+    def hotkey_label():
+        return f"Hotkey: hold {key_name} (or left-click icon)"
+
+    def start_capture():
+        nonlocal capturing
+        capturing = True
+        beep(cfg, "message")
+        tray.info("hotkey", "Hotkey: press the new key now (Esc cancels)")
+        print("press the new hotkey (Esc cancels)...", flush=True)
+
+        def timeout():
+            nonlocal capturing
+            if capturing:
+                capturing = False
+                tray.info("hotkey", hotkey_label())
+                print("hotkey change timed out", flush=True)
+
+        threading.Timer(10, timeout).start()
+
+    def finish_capture(key):
+        nonlocal capturing, hotkey, key_name, key_down
+        capturing = False
+        name = key_to_name(key)
+        if key == keyboard.Key.esc:
+            print("hotkey change cancelled", flush=True)
+        elif name is None:
+            print(f"can't use {key} as a hotkey (no name); try another key", flush=True)
+        else:
+            hotkey, key_name, key_down = parse_key(name), name, False
+            save_config_value("hotkey", name)
+            beep(cfg, "complete")
+            print(f"hotkey is now [{name}]", flush=True)
+        tray.info("hotkey", hotkey_label())
+
+    GENERIC_MODIFIERS = {"ctrl", "alt", "shift", "cmd"}
+
+    def handle_capture_press(key):
+        """On X11 pynput reports a right-hand modifier as a generic press (ctrl) and then the
+        specific one (ctrl_r). Wait briefly so the specific key is the one that gets saved."""
+        nonlocal capture_timer, capture_generic
+        name = key_to_name(key)
+        if capture_timer is not None:  # second event of a modifier pair
+            capture_timer.cancel()
+            first, capture_timer = capture_generic, None
+            specific = name and name.startswith((key_to_name(first) or "?") + "_")
+            finish_capture(key if specific else first)
+        elif name in GENERIC_MODIFIERS:
+            capture_generic = key
+
+            def settle():
+                nonlocal capture_timer
+                if capture_timer is not None:  # no specific variant followed: use the generic key
+                    capture_timer = None
+                    finish_capture(capture_generic)
+
+            capture_timer = threading.Timer(0.1, settle)
+            capture_timer.start()
+        else:
+            finish_capture(key)
+
     def edit(path):
         vocab.ensure_user_files()
         subprocess.Popen(["xdg-open", path], stderr=subprocess.DEVNULL)
@@ -431,11 +516,12 @@ def main():
             "toggle": toggle,
             "toggle_block": toggle_block,
             "unload": lambda: engine.unload(),
+            "set_hotkey": start_capture,
             "edit_vocab": lambda: edit(vocab.USER_VOCAB),
             "edit_corrections": lambda: edit(vocab.USER_CORRECTIONS),
         },
     )
-    tray.info("hotkey", f"Hotkey: hold {key_name} (or left-click icon)")
+    tray.info("hotkey", hotkey_label())
     tray.info("mic", f"Mic: {cfg['mic'] or 'system default'}")
     tray.info("last", "Last: (nothing yet)")
     refresh()
@@ -455,6 +541,9 @@ def main():
 
     def on_press(key):
         nonlocal key_down, chord, hold_id
+        if capturing:
+            handle_capture_press(key)
+            return
         if key == hotkey:
             if key_down:  # auto-repeat
                 return
@@ -478,6 +567,7 @@ def main():
         else:
             cancel_key_recording("tap: released before hold_ms")  # discard
 
+    signal.signal(signal.SIGUSR1, lambda *_: start_capture())
     print(f"{'BLOCKED' if blocked else 'ready'}: hold [{key_name}] to talk (model loads on first use)", flush=True)
     with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
         listener.join()

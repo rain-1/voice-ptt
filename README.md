@@ -36,7 +36,7 @@ Set `"vocab": false` or `"corrections": false` in the config to turn either off.
 
 `~/.config/voice-ptt/config.json` is created on first run.
 
-- `hotkey`: pynput key name (`ctrl_r`, `f13`, `pause`, ...). A foot pedal that sends the same key works unchanged.
+- `hotkey`: pynput key name (`ctrl_r`, `f13`, `pause`, ...). Easiest is the tray menu's *Change hotkey...*: press the new key (or tap the foot pedal) and it is saved here. `kill -USR1 <pid>` does the same from a shell. A foot pedal that sends the same key works unchanged.
 - `hold_ms`: 250 by default. The hotkey only counts as dictation after being held this long with no other key pressed, so taps and shortcuts like Ctrl+PageUp are ignored (audio is captured from the first instant, so no speech is lost). 0 starts immediately.
 - `model`, `language`, `device`, `compute_type`: Whisper settings (use `cpu` and `int8` without a GPU).
 - `preload`: load the model at startup instead of on first use. `idle_unload_seconds`: 300 by default, 0 keeps it loaded.
