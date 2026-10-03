@@ -23,6 +23,15 @@ The model lives in a separate worker process (`whisper_worker.py`) that starts o
 
 **Block** (tray menu) unloads the model, ignores the hotkey and remembers the setting across restarts (`~/.config/voice-ptt/state.json`) until you choose Unblock. Use it during ML runs.
 
+## Custom vocabulary
+
+Whisper mangles technical terms, so two layers fix them. Defaults for ML, robotics and AI coding ship in the repo, and your own files take priority. Use the tray menu's *Edit vocabulary...* and *Edit corrections...*, or edit the files directly.
+
+- **Vocabulary** (`vocab.txt`, `~/.config/voice-ptt/vocab.txt`): one term per line. The terms are fed to Whisper as a glossary prompt, which biases it toward those spellings. The prompt is capped (~480 chars), so put the hardest terms first. It is read when the model loads, so edits apply after the next unload or restart.
+- **Corrections** (`corrections.txt`, `~/.config/voice-ptt/corrections.txt`): `heard => written` per line, whole words, case-insensitive. Applied live, no restart.
+
+Set `"vocab": false` or `"corrections": false` in the config to turn either off. See `vocab.py` for details.
+
 ## Config
 
 `~/.config/voice-ptt/config.json` is created on first run.

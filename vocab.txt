@@ -1,0 +1,39 @@
+# Default vocabulary for machine learning, robotics and coding with AI.
+# One term per line, hardest-to-transcribe first (the prompt is capped, so later lines may be cut).
+# Add your own in ~/.config/voice-ptt/vocab.txt.
+LoRA
+QLoRA
+GRPO
+DPO
+PPO
+RLHF
+vLLM
+safetensors
+cuDNN
+MuJoCo
+URDF
+ROS 2
+Isaac Sim
+MoveIt
+SLAM
+LiDAR
+IMU
+Kalman filter
+Jetson
+ESP32
+Dynamixel
+Claude Code
+MCP
+Qwen
+Hugging Face
+PyTorch
+NumPy
+CUDA
+LLM
+sim-to-real
+imitation learning
+systemd
+pytest
+uv
+GitHub
+YAML

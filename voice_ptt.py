@@ -17,6 +17,8 @@ import time
 
 import numpy as np
 
+import vocab
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 CONFIG_PATH = os.path.expanduser("~/.config/voice-ptt/config.json")
 STATE_PATH = os.path.expanduser("~/.config/voice-ptt/state.json")
@@ -34,6 +36,8 @@ DEFAULTS = {
     "tray": True,  # colour dot in the system tray showing state
     "preload": False,  # load the model at startup instead of on first use
     "idle_unload_seconds": 300,  # unload the model (free the GPU) after this long idle; 0 = never
+    "vocab": True,  # bias Whisper toward the glossary in vocab.txt (see vocab.py)
+    "corrections": True,  # apply 'heard => written' fixes from corrections.txt
 }
 
 
@@ -146,7 +150,7 @@ class Engine:
     """Owns the whisper worker process: started on demand, killed to free the GPU."""
 
     def __init__(self, cfg, on_change):
-        self.cfg = {k: cfg[k] for k in ("model", "language", "device", "compute_type")}
+        self.cfg = {k: cfg[k] for k in ("model", "language", "device", "compute_type", "vocab")}
         self.on_change = on_change
         self.lock = threading.Lock()  # serialises requests and start/stop
         self.proc = None
@@ -281,6 +285,7 @@ def main():
     key_name = cfg["hotkey"]
     hotkey = getattr(keyboard.Key, key_name, None) or keyboard.KeyCode.from_char(key_name)
 
+    corrections = vocab.Corrections()
     rec = Recorder(cfg["mic"])
     lock = threading.Lock()  # guards recording / started_by / pending
     recording = False
@@ -315,6 +320,8 @@ def main():
         try:
             if len(audio) >= cfg["min_seconds"] * Recorder.RATE and not blocked:
                 text, secs = engine.transcribe(audio)
+                if cfg["corrections"]:
+                    text = corrections.apply(text)
                 print(f"[{secs:.2f}s] {text!r}", flush=True)
                 if text:
                     type_text(text + " ")
@@ -375,9 +382,19 @@ def main():
             if cfg["preload"]:
                 threading.Thread(target=engine.warm, daemon=True).start()
 
+    def edit(path):
+        vocab.ensure_user_files()
+        subprocess.Popen(["xdg-open", path], stderr=subprocess.DEVNULL)
+
     tray = Tray(
         cfg["tray"],
-        {"toggle": toggle, "toggle_block": toggle_block, "unload": lambda: engine.unload()},
+        {
+            "toggle": toggle,
+            "toggle_block": toggle_block,
+            "unload": lambda: engine.unload(),
+            "edit_vocab": lambda: edit(vocab.USER_VOCAB),
+            "edit_corrections": lambda: edit(vocab.USER_CORRECTIONS),
+        },
     )
     tray.info("hotkey", f"Hotkey: hold {key_name} (or left-click icon)")
     tray.info("mic", f"Mic: {cfg['mic'] or 'system default'}")

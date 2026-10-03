@@ -25,6 +25,12 @@ inp = sys.stdin.buffer
 
 cfg = json.loads(sys.argv[1])
 
+from vocab import build_prompt, is_prompt_echo  # noqa: E402
+
+prompt = build_prompt() if cfg.get("vocab", True) else None  # read at load, so edits apply on next load
+if prompt:
+    print(f"vocab prompt ({len(prompt)} chars) active", file=sys.stderr, flush=True)
+
 
 def preload_cuda_libs():
     """pip-installed cuBLAS/cuDNN aren't on the loader path; load them explicitly."""
@@ -67,6 +73,10 @@ while True:
         vad_filter=True,
         beam_size=5,
         condition_on_previous_text=False,
+        initial_prompt=prompt,
     )
     text = " ".join(s.text.strip() for s in segments).strip()
+    if is_prompt_echo(text, prompt):  # Whisper parroting the glossary on near-silence
+        print(f"dropped prompt echo: {text!r}", file=sys.stderr, flush=True)
+        text = ""
     print(json.dumps({"text": text, "secs": time.time() - t0}), file=out, flush=True)

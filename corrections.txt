@@ -1,0 +1,67 @@
+# Default corrections: 'heard => written'. Whole words, case-insensitive.
+# Add your own in ~/.config/voice-ptt/corrections.txt (applied first).
+
+# ML frameworks and terms
+pie torch => PyTorch
+pi torch => PyTorch
+tensor flow => TensorFlow
+num pie => NumPy
+numpy => NumPy
+lora => LoRA
+q lora => QLoRA
+kyoo lora => QLoRA
+r l h f => RLHF
+p p o => PPO
+d p o => DPO
+g r p o => GRPO
+l l m => LLM
+l.l.m. => LLM
+g.r.p.o. => GRPO
+g.p.u. => GPU
+vllm => vLLM
+l l ms => LLMs
+v l l m => vLLM
+safe tensors => safetensors
+safe tensor => safetensors
+hugging face => Hugging Face
+cuda => CUDA
+cudnn => cuDNN
+g p u => GPU
+g p us => GPUs
+c p u => CPU
+m c p => MCP
+claude code => Claude Code
+open ai => OpenAI
+
+# Robotics
+ros two => ROS 2
+ross two => ROS 2
+ros 2 => ROS 2
+mu joco => MuJoCo
+ru joco => MuJoCo
+rujoco => MuJoCo
+roojoko => MuJoCo
+mujoco => MuJoCo
+mu joe co => MuJoCo
+u r d f => URDF
+you are d f => URDF
+urdf => URDF
+isaac sim => Isaac Sim
+slam => SLAM
+lie dar => LiDAR
+lidar => LiDAR
+i m u => IMU
+p i d => PID
+jet son => Jetson
+e s p 32 => ESP32
+
+# Coding
+git hub => GitHub
+pie test => pytest
+system d => systemd
+j son => JSON
+y a m l => YAML
+a p i => API
+a p is => APIs
+s s h => SSH
+ros2 => ROS 2
