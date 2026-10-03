@@ -37,6 +37,7 @@ DEFAULTS = {
     "mic": None,  # pactl source name, null = system default
     "min_seconds": 0.3,
     "sound": True,
+    "sound_theme": "soft",  # a folder in sounds/: soft retro droplet marimba click bell scifi
     "tray": True,  # colour dot in the system tray showing state
     "preload": False,  # load the model at startup instead of on first use
     "idle_unload_seconds": 300,  # unload the model (free the GPU) after this long idle; 0 = never
@@ -89,10 +90,16 @@ def save_blocked(blocked):
         json.dump({"blocked": blocked}, f)
 
 
-def beep(cfg, name):
+def sound_themes():
+    root = os.path.join(HERE, "sounds")
+    return sorted(d for d in os.listdir(root) if os.path.isdir(os.path.join(root, d))) if os.path.isdir(root) else []
+
+
+def beep(cfg, event):
+    """Play the 'start' or 'stop' sound of the current theme (sounds/<theme>/<event>.wav)."""
     if not cfg["sound"]:
         return
-    path = f"/usr/share/sounds/freedesktop/stereo/{name}.oga"
+    path = os.path.join(HERE, "sounds", cfg["sound_theme"], f"{event}.wav")
     if os.path.exists(path) and shutil.which("paplay"):
         subprocess.Popen(["paplay", path], stderr=subprocess.DEVNULL)
 
@@ -381,7 +388,7 @@ def main():
             committed = source != "key" or cfg["hold_ms"] <= 0
         rec.start()
         if committed:
-            beep(cfg, "message")
+            beep(cfg, "start")
             refresh()
         return True
 
@@ -404,7 +411,7 @@ def main():
             if my_id != hold_id or not key_down or chord or not recording or started_by != "key" or committed:
                 return
             committed = True
-        beep(cfg, "message")
+        beep(cfg, "start")
         refresh()
 
     def stop_recording(source=None):
@@ -417,7 +424,7 @@ def main():
             committed = False
             pending += 1
         audio = rec.stop()
-        beep(cfg, "complete")
+        beep(cfg, "stop")
         refresh()
         threading.Thread(target=transcribe_and_type, args=(audio,), daemon=True).start()
 
@@ -452,7 +459,7 @@ def main():
     def start_capture():
         nonlocal capturing
         capturing = True
-        beep(cfg, "message")
+        beep(cfg, "start")
         tray.info("hotkey", "Hotkey: press the new key now (Esc cancels)")
         print("press the new hotkey (Esc cancels)...", flush=True)
 
@@ -476,7 +483,7 @@ def main():
         else:
             hotkey, key_name, key_down = parse_key(name), name, False
             save_config_value("hotkey", name)
-            beep(cfg, "complete")
+            beep(cfg, "stop")
             print(f"hotkey is now [{name}]", flush=True)
         tray.info("hotkey", hotkey_label())
 
@@ -506,6 +513,20 @@ def main():
         else:
             finish_capture(key)
 
+    def next_sound_theme():
+        themes = sound_themes()
+        if not themes:
+            print("no sound themes found (run make_sounds.py)", flush=True)
+            return
+        i = themes.index(cfg["sound_theme"]) if cfg["sound_theme"] in themes else -1
+        cfg["sound_theme"] = themes[(i + 1) % len(themes)]
+        cfg["sound"] = True
+        save_config_value("sound_theme", cfg["sound_theme"])
+        tray.info("sound", f"Sound: {cfg['sound_theme']}")
+        print(f"sound theme: {cfg['sound_theme']}", flush=True)
+        beep(cfg, "start")
+        threading.Timer(0.6, beep, args=(cfg, "stop")).start()
+
     def edit(path):
         vocab.ensure_user_files()
         subprocess.Popen(["xdg-open", path], stderr=subprocess.DEVNULL)
@@ -517,12 +538,14 @@ def main():
             "toggle_block": toggle_block,
             "unload": lambda: engine.unload(),
             "set_hotkey": start_capture,
+            "next_sound": next_sound_theme,
             "edit_vocab": lambda: edit(vocab.USER_VOCAB),
             "edit_corrections": lambda: edit(vocab.USER_CORRECTIONS),
         },
     )
     tray.info("hotkey", hotkey_label())
     tray.info("mic", f"Mic: {cfg['mic'] or 'system default'}")
+    tray.info("sound", f"Sound: {cfg['sound_theme'] if cfg['sound'] else 'off'}")
     tray.info("last", "Last: (nothing yet)")
     refresh()
 

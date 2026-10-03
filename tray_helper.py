@@ -11,6 +11,7 @@ stdout (to voice_ptt.py):
     toggle                       -> user left-clicked the icon or chose Start/Stop listening
     toggle_block                 -> user chose Block / Unblock
     unload                       -> user chose Unload model now
+    next_sound                   -> user chose Next sound theme
     set_hotkey                   -> user chose Change hotkey (next key press becomes the hotkey)
     edit_vocab / edit_corrections -> user chose to edit their vocabulary / corrections file
 Exits when stdin closes.
@@ -56,13 +57,15 @@ def label_item(text):
 
 menu = Gtk.Menu()
 status_item = label_item("Status: starting...")
-info_items = {k: label_item(f"{k.capitalize()}: ...") for k in ("hotkey", "model", "mic", "last")}
+info_items = {k: label_item(f"{k.capitalize()}: ...") for k in ("hotkey", "model", "mic", "sound", "last")}
 toggle_item = Gtk.MenuItem(label="Start listening")
 toggle_item.connect("activate", send("toggle"))
 unload_item = Gtk.MenuItem(label="Unload model now")
 unload_item.connect("activate", send("unload"))
 block_item = Gtk.MenuItem(label="Block (free GPU, ignore hotkey)")
 block_item.connect("activate", send("toggle_block"))
+sound_item = Gtk.MenuItem(label="Next sound theme")
+sound_item.connect("activate", send("next_sound"))
 hotkey_item = Gtk.MenuItem(label="Change hotkey...")
 hotkey_item.connect("activate", send("set_hotkey"))
 vocab_item = Gtk.MenuItem(label="Edit vocabulary...")
@@ -84,6 +87,7 @@ menu.append(unload_item)
 menu.append(block_item)
 menu.append(Gtk.SeparatorMenuItem())
 menu.append(hotkey_item)
+menu.append(sound_item)
 menu.append(vocab_item)
 menu.append(corr_item)
 menu.append(log_item)
