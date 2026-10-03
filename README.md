@@ -52,4 +52,4 @@ Set `"vocab": false` or `"corrections": false` in the config to turn either off.
 
 ## Logo
 
-`assets/logo.svg` and `assets/logo.png` (transparent background) were generated procedurally with [woodcut](../woodcut), a wood-engraving style print generator.
+`assets/logo.svg` and `assets/logo.png` (transparent background) were generated procedurally with woodcut, a separate wood-engraving style print generator.
