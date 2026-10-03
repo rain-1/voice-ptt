@@ -18,7 +18,6 @@ import numpy as np
 RATE = 44100
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sounds")
 VOLUME = 0.28  # peak level, 0..1; these fire on every phrase so keep them modest
-rng = np.random.default_rng(1)
 
 
 def t_axis(dur):
@@ -49,12 +48,6 @@ def blip(freq, dur, harm2=0.25):
     return w * np.minimum(t / 0.004, 1) * np.exp(-t * 18 / dur)
 
 
-def square(freq, dur, duty=0.5):
-    t = t_axis(dur)
-    w = np.where((t * freq) % 1 < duty, 1.0, -1.0)
-    return w * np.minimum(t / 0.002, 1) * np.minimum((dur - t) / 0.004, 1)
-
-
 def glide(f0, f1, dur, decay=10):
     t = t_axis(dur)
     f = f0 + (f1 - f0) * (t / dur)
@@ -69,22 +62,6 @@ def pluck(freq, dur=0.3, partials=((1, 1.0), (4, 0.35), (10, 0.1)), decay=9):
     return w * np.minimum(t / 0.002, 1)
 
 
-def click(center, dur=0.03, width=0.6):
-    """Band-limited noise burst, like a key switch."""
-    n = int(RATE * dur)
-    spec = np.fft.rfft(rng.standard_normal(n))
-    f = np.fft.rfftfreq(n, 1 / RATE)
-    spec *= np.exp(-(((f - center) / (center * width)) ** 2))
-    t = t_axis(dur)
-    return np.fft.irfft(spec, n) * np.exp(-t / 0.004)
-
-
-def bell(freq, dur=0.4, index=2.0, ratio=1.41, decay=7):
-    t = t_axis(dur)
-    mod = index * np.exp(-t * 8) * np.sin(2 * np.pi * freq * ratio * t)
-    return np.sin(2 * np.pi * freq * t + mod) * np.minimum(t / 0.002, 1) * np.exp(-t * decay)
-
-
 def sweep(f0, f1, dur, trem=35):
     t = t_axis(dur)
     s = glide(f0, f1, dur, decay=3) * (1 + 0.4 * np.sin(2 * np.pi * trem * t))
@@ -95,19 +72,10 @@ def sweep(f0, f1, dur, trem=35):
 THEMES = {
     # gentle rising / falling sine blips
     "soft": (seq(blip(660, 0.07), blip(990, 0.10)), seq(blip(880, 0.07), blip(587, 0.12))),
-    # 8-bit arpeggios
-    "retro": (
-        seq(square(523, 0.045), square(659, 0.045), square(784, 0.07)),
-        seq(square(784, 0.045), square(659, 0.045), square(523, 0.08)),
-    ),
     # water-drop bloops: pitch glides up on start, down on stop
     "droplet": (glide(380, 1250, 0.10, decay=6), glide(1050, 330, 0.12, decay=7)),
     # wooden marimba notes: up a fifth to start, a low tock to stop
     "marimba": (mix(pluck(523, 0.25), pluck(784, 0.25), 0.07), pluck(392, 0.3)),
-    # mechanical key switch: bright click to start, duller click to stop; the quietest and shortest
-    "click": (click(3200, 0.025) * 1.5, click(1400, 0.035, 0.8) * 1.5),
-    # bell tones, high to start, lower to stop
-    "bell": (bell(1319, 0.35), bell(880, 0.45, decay=6)),
     # sci-fi sweeps with tremolo and an echo
     "scifi": (sweep(300, 1100, 0.16), sweep(1000, 260, 0.2)),
 }

@@ -37,7 +37,7 @@ DEFAULTS = {
     "mic": None,  # pactl source name, null = system default
     "min_seconds": 0.3,
     "sound": True,
-    "sound_theme": "soft",  # a folder in sounds/: soft retro droplet marimba click bell scifi
+    "sound_theme": "soft",  # a folder in sounds/: soft droplet marimba scifi
     "tray": True,  # colour dot in the system tray showing state
     "preload": False,  # load the model at startup instead of on first use
     "idle_unload_seconds": 300,  # unload the model (free the GPU) after this long idle; 0 = never
