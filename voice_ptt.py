@@ -27,6 +27,7 @@ DEFAULTS = {
     "mic": None,  # pactl source name, null = system default
     "min_seconds": 0.3,
     "sound": True,
+    "tray": True,  # colour dot in the system tray showing state
 }
 
 
@@ -59,6 +60,69 @@ def beep(cfg, name):
     path = f"/usr/share/sounds/freedesktop/stereo/{name}.oga"
     if os.path.exists(path) and shutil.which("paplay"):
         subprocess.Popen(["paplay", path], stderr=subprocess.DEVNULL)
+
+
+STATES = {
+    # state: (colour, tooltip)
+    "loading": ((128, 128, 128), "Voice: loading model..."),
+    "ready": ((46, 160, 67), "Voice: ready"),
+    "recording": ((220, 38, 38), "Voice: listening"),
+    "transcribing": ((245, 158, 11), "Voice: transcribing"),
+}
+
+
+class Tray:
+    """System tray dot showing the current state, via tray_helper.py (XApp, system Python).
+
+    Left click calls on_toggle(); right click shows a menu with state and info lines.
+    Silently disabled if unavailable.
+    """
+
+    def __init__(self, enabled, on_toggle):
+        self.proc = None
+        self.on_toggle = on_toggle
+        if not enabled:
+            return
+        try:
+            from PIL import Image, ImageDraw
+
+            icon_dir = os.path.expanduser("~/.cache/voice-ptt/icons")
+            os.makedirs(icon_dir, exist_ok=True)
+            for name, (colour, _) in STATES.items():
+                img = Image.new("RGBA", (64, 64), (0, 0, 0, 0))
+                ImageDraw.Draw(img).ellipse((6, 6, 58, 58), fill=colour + (255,))
+                img.save(os.path.join(icon_dir, f"{name}.png"))
+            helper = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tray_helper.py")
+            self.proc = subprocess.Popen(
+                ["/usr/bin/python3", helper, icon_dir],
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                text=True,
+            )
+            threading.Thread(target=self._read_clicks, args=(self.proc,), daemon=True).start()
+        except Exception as e:
+            print(f"tray disabled: {e}", flush=True)
+            self.proc = None
+
+    def _read_clicks(self, proc):
+        for line in proc.stdout:
+            if line.strip() == "toggle":
+                self.on_toggle()
+
+    def _send(self, line):
+        if self.proc is None:
+            return
+        try:
+            self.proc.stdin.write(line + "\n")
+            self.proc.stdin.flush()
+        except Exception:
+            self.proc = None
+
+    def set(self, state):
+        self._send(f"state\t{state}\t{STATES[state][1]}")
+
+    def info(self, key, text):
+        self._send(f"info\t{key}\t{text.replace(chr(10), ' ')}")
 
 
 class Recorder:
@@ -127,6 +191,9 @@ def main():
     key_name = cfg["hotkey"]
     hotkey = getattr(keyboard.Key, key_name, None) or keyboard.KeyCode.from_char(key_name)
 
+    tray = Tray(cfg["tray"], lambda: toggle())  # toggle is defined below; looked up at click time
+    tray.set("loading")
+
     if cfg["device"] == "cuda":
         preload_cuda_libs()
     from faster_whisper import WhisperModel
@@ -138,51 +205,89 @@ def main():
         print(f"GPU load failed ({e}); falling back to CPU int8", flush=True)
         model = WhisperModel(cfg["model"], device="cpu", compute_type="int8")
 
+    device = cfg["device"] if model.model.device == cfg["device"] else "cpu"
+    model_info = f"Model: {cfg['model']} ({device})"
+    if device != cfg["device"]:
+        model_info += " - GPU unavailable"
+    tray.info("hotkey", f"Hotkey: hold {key_name} (or left-click icon)")
+    tray.info("model", model_info)
+    tray.info("mic", f"Mic: {cfg['mic'] or 'system default'}")
+    tray.info("last", "Last: (nothing yet)")
+
     rec = Recorder(cfg["mic"])
-    lock = threading.Lock()
-    held = False
+    lock = threading.Lock()  # guards recording / started_by / pending
+    transcribe_lock = threading.Lock()  # one transcription at a time
+    recording = False
+    started_by = None
+    pending = 0
 
     def transcribe_and_type(audio):
-        if len(audio) < cfg["min_seconds"] * Recorder.RATE:
-            return
-        t0 = time.time()
-        segments, _ = model.transcribe(
-            audio,
-            language=cfg["language"],
-            vad_filter=True,
-            beam_size=5,
-            condition_on_previous_text=False,
-        )
-        text = " ".join(s.text.strip() for s in segments).strip()
-        print(f"[{time.time() - t0:.2f}s] {text!r}", flush=True)
-        if text:
-            type_text(text + " ")
-
-    def on_press(key):
-        nonlocal held
-        if key != hotkey:
-            return
-        with lock:
-            if held:  # ignore auto-repeat
+        nonlocal pending
+        try:
+            if len(audio) < cfg["min_seconds"] * Recorder.RATE:
                 return
-            held = True
+            with transcribe_lock:
+                t0 = time.time()
+                segments, _ = model.transcribe(
+                    audio,
+                    language=cfg["language"],
+                    vad_filter=True,
+                    beam_size=5,
+                    condition_on_previous_text=False,
+                )
+                text = " ".join(s.text.strip() for s in segments).strip()
+            print(f"[{time.time() - t0:.2f}s] {text!r}", flush=True)
+            if text:
+                type_text(text + " ")
+                shown = text if len(text) <= 60 else text[:57] + "..."
+                tray.info("last", f"Last: {shown}")
+        finally:
+            with lock:
+                pending -= 1
+                state = "recording" if recording else "transcribing" if pending else "ready"
+            tray.set(state)
+
+    def start_recording(source):
+        nonlocal recording, started_by
+        with lock:
+            if recording:
+                return
+            recording = True
+            started_by = source
+        tray.set("recording")
         beep(cfg, "message")
         rec.start()
 
-    def on_release(key):
-        nonlocal held
-        if key != hotkey:
-            return
+    def stop_recording(source=None):
+        """Stop and transcribe. With a source, only stops a recording that source started."""
+        nonlocal recording, pending
         with lock:
-            if not held:
+            if not recording or (source and started_by != source):
                 return
-            held = False
+            recording = False
+            pending += 1
         audio = rec.stop()
+        tray.set("transcribing")
         beep(cfg, "complete")
         threading.Thread(target=transcribe_and_type, args=(audio,), daemon=True).start()
 
+    def toggle():
+        if recording:
+            stop_recording()
+        else:
+            start_recording("click")
+
+    def on_press(key):
+        if key == hotkey:  # auto-repeat presses are ignored by start_recording
+            start_recording("key")
+
+    def on_release(key):
+        if key == hotkey:
+            stop_recording("key")
+
     # Warm up so the first real phrase isn't slow.
     model.transcribe(np.zeros(16000, dtype=np.float32), language=cfg["language"])
+    tray.set("ready")
     print(f"ready: hold [{key_name}] to talk", flush=True)
     with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
         listener.join()
